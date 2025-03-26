@@ -1,48 +1,27 @@
 document.addEventListener("DOMContentLoaded", () => {
-    const uploadBtn = document.getElementById("uploadBtn");
-    const rankBtn = document.getElementById("rankBtn");
     const fileInput = document.getElementById("fileInput");
+    const rankBtn = document.getElementById("rankBtn");
     const jobDescInput = document.getElementById("jobDescription");
     const rankedResumesContainer = document.getElementById("rankedResumes");
 
-    let uploadedResumes = [];
-    const SERVER_URL = "http://localhost:4000";  
+    let storedResumes = [];
 
-    uploadBtn.addEventListener("click", async () => {
-        console.log("Upload button clicked");
-
+    fileInput.addEventListener("change", async () => {
         const files = fileInput.files;
-        if (files.length === 0) {
-            alert("Please select resumes to upload.");
-            return;
-        }
+        storedResumes = [];
 
-        const formData = new FormData();
         for (let file of files) {
-            formData.append("resumes", file);
+            if (file.type === "application/pdf") {
+                const text = await extractTextFromPDF(file);
+                storedResumes.push({ name: file.name, text });
+            }
         }
 
-        try {
-            console.log("Uploading resumes...");
-            const response = await fetch(`${SERVER_URL}/upload`, { method: "POST", body: formData });
-
-            if (!response.ok) throw new Error(`Upload failed: ${response.statusText}`);
-
-            const data = await response.json();
-            console.log("Upload response:", data);
-
-            uploadedResumes = data.uploadedResumes || [];
-            alert("Resumes uploaded successfully!");
-        } catch (error) {
-            console.error("Upload error:", error);
-            alert("Error uploading resumes. Ensure the server is running.");
-        }
+        alert("Resumes processed successfully!");
     });
 
-    rankBtn.addEventListener("click", async () => {
-        console.log("Rank button clicked");
-
-        if (!uploadedResumes.length) {
+    rankBtn.addEventListener("click", () => {
+        if (!storedResumes.length) {
             alert("Please upload resumes first.");
             return;
         }
@@ -53,39 +32,43 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        try {
-            console.log("Sending ranking request...");
-            const response = await fetch(`${SERVER_URL}/rank`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ jobDescription }),
-            });
-
-            if (!response.ok) throw new Error(`Ranking failed: ${response.statusText}`);
-
-            const data = await response.json();
-            console.log("Ranked Resumes:", data.rankedResumes);
-
-            displayRankedResumes(data.rankedResumes);
-        } catch (error) {
-            console.error("Error ranking resumes:", error);
-            alert("Error ranking resumes. Check console for details.");
-        }
+        const rankedResumes = rankResumes(storedResumes, jobDescription);
+        displayRankedResumes(rankedResumes);
     });
+
+    function extractTextFromPDF(file) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = async function () {
+                const pdf = await pdfjsLib.getDocument(new Uint8Array(reader.result)).promise;
+                let text = "";
+
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const content = await page.getTextContent();
+                    text += content.items.map(item => item.str).join(" ") + " ";
+                }
+
+                resolve(text);
+            };
+            reader.readAsArrayBuffer(file);
+        });
+    }
+
+    function rankResumes(resumes, jobDescription) {
+        return resumes.map(resume => {
+            let score = jobDescription.split(" ").reduce((acc, word) => {
+                return acc + (resume.text.includes(word) ? 1 : 0);
+            }, 0);
+
+            return { name: resume.name, score };
+        }).sort((a, b) => b.score - a.score);
+    }
 
     function displayRankedResumes(rankedResumes) {
         rankedResumesContainer.innerHTML = "";
-
-        if (!Array.isArray(rankedResumes) || rankedResumes.length === 0) {
-            rankedResumesContainer.innerHTML = "<p>No resumes ranked.</p>";
-            return;
-        }
-
         rankedResumes.forEach((resume, index) => {
-            const resumeItem = document.createElement("div");
-            resumeItem.className = "resume-item";
-            resumeItem.innerHTML = `<strong>${index + 1}. ${resume.name}</strong> - Score: <strong>${parseFloat(resume.score).toFixed(2)}</strong>`;
-            rankedResumesContainer.appendChild(resumeItem);
+            rankedResumesContainer.innerHTML += `<p>${index + 1}. ${resume.name} - Score: ${resume.score}</p>`;
         });
     }
 });
